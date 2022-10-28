@@ -1,2 +1,2 @@
 # GyroGlove
-Firmware for transforming a glove into a functional game-controller.
+Firmware for transforming an innocent glove into a functional game-controller.
