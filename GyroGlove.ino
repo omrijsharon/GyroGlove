@@ -81,6 +81,7 @@ int throttle;
 float throttle_avg;
 int avg_size;
 int min_throttle;
+int mid_throttle;
 int max_throttle;
 
 
@@ -226,8 +227,10 @@ void setup() {
     EEPROM.get(8, yGyroOffset);
     EEPROM.get(10, zGyroOffset);
     EEPROM.get(12, min_throttle);
-    EEPROM.get(14, max_throttle);
-    EEPROM.get(16, avg_size);
+    EEPROM.get(14, mid_throttle);
+    EEPROM.get(16, max_throttle);
+    EEPROM.get(18, avg_size);
+
 
     Joystick.begin();
     Joystick.setRyAxisRange(0, 16384); // Throttle!!!
@@ -246,7 +249,7 @@ void setup() {
   
     // Initialize serial communication for debugging
     Serial.begin(115200);
-    while (!Serial); 
+    // while (!Serial); 
     // Initialize MPU6050
     mpu.initialize();
 
@@ -262,7 +265,6 @@ void setup() {
     /* * * * * * * * * * * * * * * * * * * *
      * IMPORTANT!
      * Supply your own MPU6050 offsets here
-     * Otherwise robot will not balance properly.
      * * * * * * * * * * * * * * * * * * * */
 
     Serial.print("offsets:\t");
@@ -346,7 +348,13 @@ void loop() {
           raw_throttle = analogRead(bendPin);
           throttle_avg = (throttle_avg * (avg_size-1) + raw_throttle) / avg_size;
       }
-  throttle = map(constrain(16 * throttle_avg, min_throttle, max_throttle), min_throttle, max_throttle, 0, 16384);
+  throttle = constrain(16 * throttle_avg, min_throttle, max_throttle);
+  if (throttle < mid_throttle) {
+    throttle = map(throttle, min_throttle, mid_throttle, 0, 8192);
+  }
+  else {
+    throttle = map(throttle, mid_throttle, max_throttle, 8192, 16384);
+  }
 
   // Calculating absolute world position and velocity
   acceleration[0] = gravity_const * aaWorld.x/16384.0;
