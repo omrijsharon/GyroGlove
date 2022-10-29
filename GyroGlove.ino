@@ -49,6 +49,14 @@ float yx_projection;
 float yz_projection;
 float xz_projection;
 
+// Glitch Fixer
+// -- -- -- -- -- -- -- -- -- -- -- -- -- --
+int counter = 0;
+int size = 4;
+float roll_array[4];
+float pitch_array[4];
+float yaw_array[4];
+
 // World Position
 // -- -- -- -- -- -- -- -- -- -- -- -- -- --
 float position[3] = {0.0, 0.0, 0.0};
@@ -89,7 +97,49 @@ int max_throttle;
 bool blinkState = false;
 
 // ================================================================
-// === Calculatio rotation matrix from quaternion               ===
+// === calculating the std of a sample in an array              ===
+// ================================================================
+float exclude_glitch_sample(float *array, int size) {
+  float sum = 0;
+  float mean = 0;
+  int idx_max_std = 0;
+  float std[size];
+
+  // calculate the std of each sample without its effect on the mean
+  for (int j = 0; j < size; j++) {
+    // calculate mean without the jth element
+    sum = 0;
+    for (int i = 0; i < size; i++) {
+      if (i != j) {
+        sum += array[i];
+      }
+    }
+    mean = sum / (size-1);
+    std[j] = pow((array[j] - mean), 2);
+    // Serial.print(std[j]); Serial.print(",");
+  }
+  // Serial.println("");
+  // argmax of std
+  for (int i = 1; i < size; i++) {
+    if (std[i] > std[idx_max_std]) {
+      idx_max_std = i;
+    }
+  }
+  // Serial.print("max_std: "); Serial.println(std[idx_max_std]*16384);
+
+  // calculate the mean without the sample with the highest std
+  sum = 0;
+  for (int i = 0; i < size; i++) {
+    if (i != idx_max_std) {
+      sum += array[i];
+    }
+  }
+  mean = sum / (size-1);
+  return mean;
+}
+
+// ================================================================
+// === Calculating rotation matrix from quaternion               ===
 // ================================================================
 
 void rotation_matrix_from_quaternion(Quaternion *q, float rotation_matrix[3][3]) {
@@ -424,22 +474,34 @@ void loop() {
   */
   
   /*
-  Serial.print("monitor x: "); Serial.print(yx_projection);  Serial.print(",");
-  Serial.print("monitor y: "); Serial.print(yz_projection);  Serial.print(",");
-  Serial.print("monitorol: "); Serial.print(xz_projection);  Serial.print(",");
-  Serial.print("throttle : "); Serial.print(throttle);  Serial.println("");
+  Serial.print("yaw: "); Serial.print(yx_projection); Serial.print(",");
+  Serial.print("pitch: "); Serial.print(yz_projection); Serial.print(",");
+  Serial.print("roll: "); Serial.print(xz_projection); Serial.print(",");
+  //Serial.print("throttle : "); Serial.print(throttle);  Serial.println("");
   */
+  
+  //  Exclude glitched sample from measurement:
+  yaw_array[counter % size] = yx_projection;
+  pitch_array[counter % size] = yz_projection;
+  roll_array[counter % size] = xz_projection;
+  counter ++;
+  yawStick = exclude_glitch_sample(yaw_array, size) * 16384;
+  pitchStick = -1 * exclude_glitch_sample(pitch_array, size) * 16384;
+  rollStick = exclude_glitch_sample(roll_array, size) * 16384;
 
-
-
-  yawStick = yx_projection * 16384;
-  pitchStick = -1.0 * yz_projection * 16384; // reversed pitch feels more natural.
-  rollStick = xz_projection * 16384;
-
-
-  Joystick.setRyAxis(throttle);
+  // Serial.print("yaw: "); Serial.print(yawStick); Serial.print(",");
+  // Serial.print("pitch: "); Serial.print(pitchStick); Serial.print(",");
+  // Serial.print("roll: "); Serial.print(rollStick); Serial.println("");
+  if (counter==16384){
+    counter = 0;
+  }
+  
+  // yawStick = yx_projection * 16384;
+  // pitchStick = -1.0 * yz_projection * 16384; // reversed pitch feels more natural.
+  // rollStick = xz_projection * 16384;
   Joystick.setRxAxis(yawStick);
   Joystick.setXAxis(rollStick);
   Joystick.setYAxis(pitchStick);
+  Joystick.setRyAxis(throttle);
 
 }
