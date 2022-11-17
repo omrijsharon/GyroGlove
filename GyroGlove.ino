@@ -5,6 +5,8 @@
 #include <Wire.h>
 #include <Joystick.h>
 #include <EEPROM.h>
+#include "PPMEncoder.h"
+
 
 // Specific I2C addresses may be passed as a parameter here
 MPU6050 mpu;        			// Default: AD0 low = 0x68
@@ -92,7 +94,13 @@ int min_throttle;
 int mid_throttle;
 int max_throttle;
 
+// PPM
+// -- -- -- -- -- -- -- -- -- -- -- -- -- --
+#define PPM_PIN 5
 
+
+// LED
+// -- -- -- -- -- -- -- -- -- -- -- -- -- --
 #define LED_PIN 13
 bool blinkState = false;
 
@@ -281,7 +289,6 @@ void setup() {
     EEPROM.get(16, max_throttle);
     EEPROM.get(18, avg_size);
 
-
     Joystick.begin();
     Joystick.setRyAxisRange(0, 16384); // Throttle!!!
     Joystick.setRxAxisRange(-16384, 16384);
@@ -294,8 +301,9 @@ void setup() {
     pinMode(BEND_Vin, OUTPUT);
     digitalWrite(BEND_Vin, HIGH);
     pinMode(LED_PIN, OUTPUT);
-    blink(100, 50);
+    blink(2, 10);
     Wire.begin();
+    ppmEncoder.begin(PPM_PIN, 8);
   
     // Initialize serial communication for debugging
     Serial.begin(115200);
@@ -337,7 +345,7 @@ void setup() {
     Serial.println(avg_size); 
     Serial.println(""); 
 
-    delay(1000);
+    delay(50);
 
     mpu.setXAccelOffset(xAccelOffset);
     mpu.setYAccelOffset(yAccelOffset);
@@ -405,6 +413,7 @@ void loop() {
   else {
     throttle = map(throttle, mid_throttle, max_throttle, 8192, 16384);
   }
+  throttle = 16384 - throttle;
 
   // Calculating absolute world position and velocity
   acceleration[0] = gravity_const * aaWorld.x/16384.0;
@@ -503,5 +512,9 @@ void loop() {
   Joystick.setXAxis(rollStick);
   Joystick.setYAxis(pitchStick);
   Joystick.setRyAxis(throttle);
+  ppmEncoder.setChannel(3, map(yawStick, -16384, 16384, 1000, 2000));
+  ppmEncoder.setChannel(1, map(rollStick, -16384, 16384, 1000, 2000));
+  ppmEncoder.setChannel(2, map(pitchStick, -16384, 16384, 1000, 2000));
+  ppmEncoder.setChannel(0, map(throttle, 0, 16384, 1000, 2000));
 
 }
