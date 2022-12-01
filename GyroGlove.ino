@@ -496,7 +496,7 @@ void loop() {
   counter ++;
   yawStick = exclude_glitch_sample(yaw_array, size) * 16384;
   pitchStick = -1 * exclude_glitch_sample(pitch_array, size) * 16384;
-  rollStick = exclude_glitch_sample(roll_array, size) * 16384;
+  rollStick = -1 * exclude_glitch_sample(roll_array, size) * 16384;
 
   // Serial.print("yaw: "); Serial.print(yawStick); Serial.print(",");
   // Serial.print("pitch: "); Serial.print(pitchStick); Serial.print(",");
