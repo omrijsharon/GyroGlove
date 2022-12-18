@@ -5,8 +5,22 @@
 #include <Wire.h>
 #include <Joystick.h>
 #include <EEPROM.h>
+#include <FastLED.h>
 #include "PPMEncoder.h"
 
+
+// WS2812B LED
+// -- -- -- -- -- -- -- -- -- -- -- -- -- --
+// How many leds in your strip?
+#define NUM_LEDS 12 
+// LED DIN pin
+#define DATA_PIN 10
+// Define the array of leds
+CRGB leds[NUM_LEDS];
+// throttle to LED:
+int throttLED = 0;
+// brightness
+int brightness = 60;
 
 // Specific I2C addresses may be passed as a parameter here
 MPU6050 mpu;        			// Default: AD0 low = 0x68
@@ -27,7 +41,7 @@ int xAccelOffset, yAccelOffset, zAccelOffset, xGyroOffset, yGyroOffset, zGyroOff
 
 // Orientation/Motion
 // -- -- -- -- -- -- -- -- -- -- -- -- -- --
-Quaternion q;                   // [w, x, y, z]       Quaternion Container
+Quaternion quat;                   // [w, x, y, z]       Quaternion Container
 VectorInt16 aa;                 // [x, y, z]            accel sensor measurements
 VectorInt16 aaReal;             // [x, y, z]            gravity-free accel sensor measurements
 VectorInt16 aaWorld;            // [x, y, z]            world-frame accel sensor measurements
@@ -97,6 +111,7 @@ int max_throttle;
 // PPM
 // -- -- -- -- -- -- -- -- -- -- -- -- -- --
 #define PPM_PIN 5
+#define PPM_Ground 9
 
 
 // LED
@@ -150,16 +165,16 @@ float exclude_glitch_sample(float *array, int size) {
 // === Calculating rotation matrix from quaternion               ===
 // ================================================================
 
-void rotation_matrix_from_quaternion(Quaternion *q, float rotation_matrix[3][3]) {
-  rotation_matrix[0][0] = 1 - 2 * q->y * q->y - 2 * q->z * q->z;
-  rotation_matrix[0][1] = 2 * q->x * q->y - 2 * q->z * q->w;
-  rotation_matrix[0][2] = 2 * q->x * q->z + 2 * q->y * q->w;
-  rotation_matrix[1][0] = 2 * q->x * q->y + 2 * q->z * q->w;
-  rotation_matrix[1][1] = 1 - 2 * q->x * q->x - 2 * q->z * q->z;
-  rotation_matrix[1][2] = 2 * q->y * q->z - 2 * q->x * q->w;
-  rotation_matrix[2][0] = 2 * q->x * q->z - 2 * q->y * q->w;
-  rotation_matrix[2][1] = 2 * q->y * q->z + 2 * q->x * q->w;
-  rotation_matrix[2][2] = 1 - 2 * q->x * q->x - 2 * q->y * q->y;
+void rotation_matrix_from_quaternion(Quaternion *quat, float rotation_matrix[3][3]) {
+  rotation_matrix[0][0] = 1 - 2 * quat->y * quat->y - 2 * quat->z * quat->z;
+  rotation_matrix[0][1] = 2 * quat->x * quat->y - 2 * quat->z * quat->w;
+  rotation_matrix[0][2] = 2 * quat->x * quat->z + 2 * quat->y * quat->w;
+  rotation_matrix[1][0] = 2 * quat->x * quat->y + 2 * quat->z * quat->w;
+  rotation_matrix[1][1] = 1 - 2 * quat->x * quat->x - 2 * quat->z * quat->z;
+  rotation_matrix[1][2] = 2 * quat->y * quat->z - 2 * quat->x * quat->w;
+  rotation_matrix[2][0] = 2 * quat->x * quat->z - 2 * quat->y * quat->w;
+  rotation_matrix[2][1] = 2 * quat->y * quat->z + 2 * quat->x * quat->w;
+  rotation_matrix[2][2] = 1 - 2 * quat->x * quat->x - 2 * quat->y * quat->y;
 }
 
 void normalize_vector(float *vector){
@@ -253,15 +268,15 @@ void accelgyroData(){
         fifoCount -= packetSize;
 
         // Get sensor data
-        mpu.dmpGetQuaternion(&q, fifoBuffer);
-        rotation_matrix_from_quaternion(&q, rotation_matrix);
+        mpu.dmpGetQuaternion(&quat, fifoBuffer);
+        rotation_matrix_from_quaternion(&quat, rotation_matrix);
         mpu.dmpGetAccel(&aa, fifoBuffer);
         mpu.dmpGetGyro(gyro, fifoBuffer);
-        mpu.dmpGetGravity(&gravity, &q);
+        mpu.dmpGetGravity(&gravity, &quat);
         mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
-        mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
-        mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-        mpu.dmpGetEuler(euler, &q);
+        mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &quat);
+        mpu.dmpGetYawPitchRoll(ypr, &quat, &gravity);
+        mpu.dmpGetEuler(euler, &quat);
         mpu.resetFIFO();
 
     }
@@ -300,11 +315,15 @@ void setup() {
     // Joystick.setRyAxisRange(-1, 1);
     pinMode(BEND_Vin, OUTPUT);
     digitalWrite(BEND_Vin, HIGH);
+	  FastLED.addLeds<WS2812,DATA_PIN,RGB>(leds,NUM_LEDS);
+	  FastLED.setBrightness(84);
     pinMode(LED_PIN, OUTPUT);
     blink(2, 10);
     Wire.begin();
     ppmEncoder.begin(PPM_PIN, 8);
-  
+    pinMode(PPM_Ground, OUTPUT);
+    digitalWrite(PPM_Ground, LOW);
+
     // Initialize serial communication for debugging
     Serial.begin(115200);
     // while (!Serial); 
@@ -416,14 +435,14 @@ void loop() {
   throttle = 16384 - throttle;
 
   // Calculating absolute world position and velocity
-  acceleration[0] = gravity_const * aaWorld.x/16384.0;
-  acceleration[1] = gravity_const * aaWorld.y/16384.0;
-  acceleration[2] = gravity_const * aaWorld.z/16384.0;
-  for (int i=0; i<3; i++){
-      velocity[i] =  0.98 * velocity[i] + acceleration[i] * dt;
-      position[i] += velocity[i] * dt;
-  }
-  t0 = t1;
+  // acceleration[0] = gravity_const * aaWorld.x/16384.0;
+  // acceleration[1] = gravity_const * aaWorld.y/16384.0;
+  // acceleration[2] = gravity_const * aaWorld.z/16384.0;
+  // for (int i=0; i<3; i++){
+  //     velocity[i] =  0.98 * velocity[i] + acceleration[i] * dt;
+  //     position[i] += velocity[i] * dt;
+  // }
+  // t0 = t1;
   // roll = get_roll() - roll0;
   // pitch = get_pitch() - pitch0;
   // yaw = get_yaw() - yaw0;
@@ -434,10 +453,10 @@ void loop() {
   // Serial.print("T: "); Serial.print(throttle); //Serial.print(",");
   /*
   Serial.print("quaternion: ");
-  Serial.print("qw: "); Serial.print(16384*q.w); Serial.print(",");
-  Serial.print("qx: "); Serial.print(16384*q.x); Serial.print(",");
-  Serial.print("qy: "); Serial.print(16384*q.y); Serial.print(",");
-  Serial.print("qz: "); Serial.print(16384*q.z);
+  Serial.print("qw: "); Serial.print(16384*quat.w); Serial.print(",");
+  Serial.print("qx: "); Serial.print(16384*quat.x); Serial.print(",");
+  Serial.print("qy: "); Serial.print(16384*quat.y); Serial.print(",");
+  Serial.print("qz: "); Serial.print(16384*quat.z);
   Serial.println("");
   */
 
@@ -485,10 +504,9 @@ void loop() {
   /*
   Serial.print("yaw: "); Serial.print(yx_projection); Serial.print(",");
   Serial.print("pitch: "); Serial.print(yz_projection); Serial.print(",");
-  Serial.print("roll: "); Serial.print(xz_projection); Serial.print(",");
+  Serial.print("roll: "); Serial.print(xz_projection); Serial.print(",");את
   //Serial.print("throttle : "); Serial.print(throttle);  Serial.println("");
   */
-  
   //  Exclude glitched sample from measurement:
   yaw_array[counter % size] = yx_projection;
   pitch_array[counter % size] = yz_projection;
@@ -505,6 +523,19 @@ void loop() {
     counter = 0;
   }
   
+  throttLED = (int) 12 * (float) throttle / 16384;
+  Serial.print("throttLED : "); Serial.print(throttLED);  Serial.println("");
+
+  for(int i = 0; i < NUM_LEDS; i++) {
+    if(i<throttLED) {
+      leds[i] = CHSV((100-21*i) % 255, 255, brightness);
+    }
+    else {
+      leds[i] = CHSV(0, 255, 0);
+    }
+    FastLED.show();
+  }
+
   // yawStick = yx_projection * 16384;
   // pitchStick = -1.0 * yz_projection * 16384; // reversed pitch feels more natural.
   // rollStick = xz_projection * 16384;
